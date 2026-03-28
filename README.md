@@ -96,7 +96,7 @@ No external libraries needed — uses Python built-ins only.
 | Phase | What it builds | Status |
 |-------|---------------|--------|
 | Phase 1 | Log parsing — read and classify every line | ✅ Complete |
-| Phase 2 | Threat detection — auto-detect brute force attacks | 🔄 In progress |
+| Phase 2 | | Phase 2 | Threat detection — auto-detect brute force attacks | ✅ Complete |
 | Phase 3 | Severity scoring — rank threats critical/high/medium | ⏳ Planned |
 | Phase 4 | CSV export — professional security report | ⏳ Planned |
 
