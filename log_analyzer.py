@@ -3,10 +3,11 @@
 LOG FILE ANALYZER - Security Tool
 Author: Rishabh Raj
 Purpose: Parse and analyze security log files to detect threats
-Phase 2: Threat detection - brute force, enumeration, distributed attacks
+Phase 3: CSV export and professional incident reporting
 """
 
 import os
+import csv
 from datetime import datetime
 
 class LogAnalyzer:
@@ -14,11 +15,15 @@ class LogAnalyzer:
         self.log_file = None
         self.log_entries = []
         self.total_lines = 0
-
-        # Phase 2: thresholds for threat detection
-        # If an IP fails login this many times → it's an attack
         self.brute_force_threshold = 5
         self.critical_threshold = 10
+        self.reports_folder = 'reports'
+        self.create_reports_folder()
+
+    def create_reports_folder(self):
+        """Create reports folder if it doesn't exist"""
+        if not os.path.exists(self.reports_folder):
+            os.makedirs(self.reports_folder)
 
     def load_log_file(self, filepath):
         """Read log file and store every line"""
@@ -80,44 +85,20 @@ class LogAnalyzer:
         return entry
 
     def detect_threats(self, parsed_entries):
-        """
-        Phase 2 core function — analyze all parsed entries and find attacks.
-
-        How it works:
-        1. Count how many times each IP failed login
-        2. Count how many invalid usernames each IP tried
-        3. Check if many different IPs are each failing a few times
-        4. Generate alerts based on thresholds
-        """
-
-        # Dictionary to count failed logins per IP
-        # Example: {'185.220.101.45': 8, '45.33.32.156': 5}
+        """Detect brute force, enumeration and distributed attacks"""
         ip_fail_count = {}
-
-        # Dictionary to count invalid user attempts per IP
         ip_invalid_count = {}
-
-        # List to collect all alerts found
         alerts = []
 
-        # --- Step 1: Count failures per IP ---
         for entry in parsed_entries:
             ip = entry['ip_address']
-
             if entry['event_type'] == 'FAILED_LOGIN':
-                # If IP is already in dictionary, add 1
-                # If IP is new, start count at 0 then add 1
                 ip_fail_count[ip] = ip_fail_count.get(ip, 0) + 1
-
             if entry['event_type'] == 'INVALID_USER':
                 ip_invalid_count[ip] = ip_invalid_count.get(ip, 0) + 1
 
-        # --- Step 2: Check for brute force ---
-        # Any IP that failed 5+ times is doing a brute force attack
         for ip, count in ip_fail_count.items():
-
             if count >= self.critical_threshold:
-                # Very high number of attempts = critical threat
                 alerts.append({
                     'severity': 'CRITICAL',
                     'threat_type': 'BRUTE_FORCE',
@@ -125,9 +106,7 @@ class LogAnalyzer:
                     'count': count,
                     'description': f"Extreme brute force — {count} failed attempts"
                 })
-
             elif count >= self.brute_force_threshold:
-                # 5-9 attempts = high severity
                 alerts.append({
                     'severity': 'HIGH',
                     'threat_type': 'BRUTE_FORCE',
@@ -136,8 +115,6 @@ class LogAnalyzer:
                     'description': f"Brute force detected — {count} failed attempts"
                 })
 
-        # --- Step 3: Check for user enumeration ---
-        # Attacker trying many different usernames = mapping the system
         for ip, count in ip_invalid_count.items():
             if count >= 3:
                 alerts.append({
@@ -148,40 +125,136 @@ class LogAnalyzer:
                     'description': f"User enumeration — {count} invalid usernames tried"
                 })
 
-        # --- Step 4: Check for distributed attack ---
-        # Many different IPs each failing 1-2 times = coordinated attack
-        # Count how many unique IPs have at least 1 failed login
         attacking_ips = [ip for ip, count in ip_fail_count.items() if count >= 1]
-
         if len(attacking_ips) >= 4:
             alerts.append({
                 'severity': 'MEDIUM',
                 'threat_type': 'DISTRIBUTED_ATTACK',
                 'ip': f"{len(attacking_ips)} different IPs",
                 'count': len(attacking_ips),
-                'description': f"Possible distributed attack — {len(attacking_ips)} unique attacking IPs"
+                'description': f"Distributed attack — {len(attacking_ips)} unique attacking IPs"
             })
 
         return alerts, ip_fail_count, ip_invalid_count
 
+    def save_to_csv(self, alerts):
+        """
+        Phase 3 core feature — save all alerts to a CSV report file.
+
+        How it works:
+        1. Create a filename with timestamp so each scan gets its own file
+        2. Open that file for writing
+        3. Write a header row (column names)
+        4. Write one row per alert
+        5. Close the file and return the path
+        """
+
+        # Timestamp makes every report unique
+        # Example: report_2026-04-11_18-04-30.csv
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"report_{timestamp}.csv"
+        filepath = os.path.join(self.reports_folder, filename)
+
+        try:
+            with open(filepath, 'w', newline='') as csvfile:
+
+                # Define column names
+                fieldnames = [
+                    'Timestamp',
+                    'Threat_Type',
+                    'Severity',
+                    'Source_IP',
+                    'Attempt_Count',
+                    'Description',
+                    'Recommendation'
+                ]
+
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+                # Write the header row first
+                writer.writeheader()
+
+                # Write one row for each alert
+                for alert in alerts:
+
+                    # Decide recommendation based on severity
+                    if alert['severity'] == 'CRITICAL':
+                        recommendation = "BLOCK IP IMMEDIATELY"
+                    elif alert['severity'] == 'HIGH':
+                        recommendation = "INVESTIGATE AND BLOCK"
+                    elif alert['severity'] == 'MEDIUM':
+                        recommendation = "MONITOR CLOSELY"
+                    else:
+                        recommendation = "LOG AND WATCH"
+
+                    writer.writerow({
+                        'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        'Threat_Type': alert['threat_type'],
+                        'Severity': alert['severity'],
+                        'Source_IP': alert['ip'],
+                        'Attempt_Count': alert['count'],
+                        'Description': alert['description'],
+                        'Recommendation': recommendation
+                    })
+
+            return filepath
+
+        except Exception as e:
+            print(f"Error saving CSV: {e}")
+            return None
+
+    def print_dashboard(self, alerts):
+        """
+        Phase 3 — print a clean final summary dashboard.
+        This is what a manager or senior analyst sees first.
+        """
+
+        # Count alerts by severity
+        critical = sum(1 for a in alerts if a['severity'] == 'CRITICAL')
+        high = sum(1 for a in alerts if a['severity'] == 'HIGH')
+        medium = sum(1 for a in alerts if a['severity'] == 'MEDIUM')
+        low = sum(1 for a in alerts if a['severity'] == 'LOW')
+
+        print(f"\n{'='*60}")
+        print("  SECURITY DASHBOARD — FINAL SUMMARY")
+        print("="*60)
+        print(f"\n  Total threats detected : {len(alerts)}")
+        print(f"  CRITICAL               : {critical}")
+        print(f"  HIGH                   : {high}")
+        print(f"  MEDIUM                 : {medium}")
+        print(f"  LOW                    : {low}")
+
+        # Overall risk rating
+        print(f"\n  Overall network risk: ", end="")
+        if critical > 0:
+            print("*** CRITICAL — IMMEDIATE ACTION REQUIRED ***")
+        elif high > 0:
+            print("** HIGH — URGENT INVESTIGATION NEEDED **")
+        elif medium > 0:
+            print("* MEDIUM — MONITOR AND INVESTIGATE *")
+        else:
+            print("LOW — NETWORK APPEARS NORMAL")
+
+        print("="*60)
+
     def analyze(self):
-        """Parse all entries then run threat detection"""
+        """Parse all entries, detect threats, export report"""
         if not self.log_entries:
             print("No log entries loaded.")
             return
 
         print("\n" + "="*60)
-        print("  LOG ANALYZER - Phase 2: Threat Detection")
+        print("  LOG ANALYZER - Phase 3: Incident Reporting")
         print("  Author: Rishabh Raj")
         print("="*60)
 
-        # Step 1: Parse every line (same as Phase 1)
+        # Step 1: Parse every line
         parsed_entries = []
         for line in self.log_entries:
             entry = self.parse_entry(line)
             parsed_entries.append(entry)
 
-        # Count event types for summary
+        # Count event types
         failed = sum(1 for e in parsed_entries if e['event_type'] == 'FAILED_LOGIN')
         success = sum(1 for e in parsed_entries if e['event_type'] == 'SUCCESSFUL_LOGIN')
         invalid = sum(1 for e in parsed_entries if e['event_type'] == 'INVALID_USER')
@@ -193,10 +266,10 @@ class LogAnalyzer:
         print(f"  Successful logins: {success}")
         print(f"  Invalid users    : {invalid}")
 
-        # Step 2: Run threat detection (NEW in Phase 2)
+        # Step 2: Detect threats
         alerts, ip_fail_count, ip_invalid_count = self.detect_threats(parsed_entries)
 
-        # Step 3: Show IP failure breakdown
+        # Step 3: Show IP analysis table
         print(f"\n{'='*60}")
         print("  IP ADDRESS ANALYSIS")
         print("="*60)
@@ -206,7 +279,6 @@ class LogAnalyzer:
         for ip, count in sorted(ip_fail_count.items(),
                                   key=lambda x: x[1],
                                   reverse=True):
-            # Show risk level based on count
             if count >= self.critical_threshold:
                 risk = "CRITICAL"
             elif count >= self.brute_force_threshold:
@@ -215,7 +287,6 @@ class LogAnalyzer:
                 risk = "MEDIUM"
             else:
                 risk = "LOW"
-
             print(f"{ip:<20} {count:<20} {risk}")
 
         # Step 4: Show all alerts
@@ -245,25 +316,36 @@ class LogAnalyzer:
         if critical_alerts:
             print("\n  [URGENT] Block these IPs immediately:")
             for alert in critical_alerts:
-                print(f"    → {alert['ip']}")
+                print(f"    --> {alert['ip']}")
 
         if high_alerts:
             print("\n  [ACTION] Investigate these IPs:")
             for alert in high_alerts:
-                print(f"    → {alert['ip']} — {alert['description']}")
+                print(f"    --> {alert['ip']} — {alert['description']}")
 
         if not alerts:
             print("\n  Network activity appears normal.")
-            print("  Continue monitoring.")
 
-        print("\n" + "="*60)
+        # Step 6: Save to CSV (NEW in Phase 3)
+        if alerts:
+            csv_path = self.save_to_csv(alerts)
+            if csv_path:
+                print(f"\n{'='*60}")
+                print(f"  REPORT SAVED")
+                print("="*60)
+                print(f"\n  CSV report saved to: {csv_path}")
+                print(f"  Open in Excel to view full incident report.")
+
+        # Step 7: Print dashboard (NEW in Phase 3)
+        self.print_dashboard(alerts)
+
         return parsed_entries, alerts
 
 
 def main():
     print("\n" + "="*60)
     print("  LOG FILE ANALYZER - Network Security Tool")
-    print("  Author: Rishabh Raj | Phase 2: Threat Detection")
+    print("  Author: Rishabh Raj | Phase 3: Incident Reporting")
     print("="*60)
 
     analyzer = LogAnalyzer()
